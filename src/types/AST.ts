@@ -161,6 +161,10 @@ export const T_ANY_ADDITIONAL_PROPERTIES: TAny & ASTWithName = {
   type: 'ANY',
 }
 
+export const T_STRING: TString = {
+  type: 'STRING',
+}
+
 export const T_UNKNOWN: TUnknown = {
   type: 'UNKNOWN',
 }

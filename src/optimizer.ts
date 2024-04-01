@@ -1,7 +1,7 @@
 import {uniqBy} from 'lodash'
 import {Options} from '.'
 import {generateType} from './generator'
-import {AST, T_ANY, T_UNKNOWN} from './types/AST'
+import {AST, T_ANY, T_STRING, T_UNKNOWN} from './types/AST'
 import {log} from './utils'
 
 export function optimize(ast: AST, options: Options, processed = new Set<AST>()): AST {
@@ -12,16 +12,61 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
   processed.add(ast)
 
   switch (ast.type) {
+    case 'ARRAY':
+      ast = Object.assign(ast, {
+        params: optimize(ast.params, options, processed),
+      })
+
+      if (ast.params.standaloneName && ast.params.type === 'STRING') {
+        if (ast.params.comment) {
+          ast = Object.assign(ast, {
+            params: {...T_STRING, comment: ast.params.comment},
+          })
+        } else {
+          ast = Object.assign(ast, {
+            params: T_STRING,
+          })
+        }
+      }
+
+      return ast
+    case 'TUPLE':
+      ast = Object.assign(ast, {
+        params: ast.params.map(_ => optimize(_, options, processed)),
+      })
+      return ast
     case 'INTERFACE':
-      return Object.assign(ast, {
+      ast = Object.assign(ast, {
         params: ast.params.map(_ => Object.assign(_, {ast: optimize(_.ast, options, processed)})),
       })
+
+      ast = Object.assign(ast, {
+        params: ast.params.map(_ => {
+          if (_.ast.standaloneName && _.ast.type === 'STRING') {
+            if (_.ast.comment) {
+              return Object.assign(_, {ast: {...T_STRING, comment: _.ast.comment}})
+            } else {
+              return Object.assign(_, {ast: T_STRING})
+            }
+          }
+          return _
+        }),
+      })
+
+      ast = optimize(ast, options, processed)
+
+      return ast
     case 'INTERSECTION':
     case 'UNION':
       // Start with the leaves...
       const optimizedAST = Object.assign(ast, {
         params: ast.params.map(_ => optimize(_, options, processed)),
       })
+
+      // [A, B, C, null] -> [A, B, C]
+      if (optimizedAST.params.some(_ => _.type === 'NULL')) {
+        optimizedAST.params = optimizedAST.params.filter(_ => _.type !== 'NULL')
+      }
 
       // [A, B, C, Any] -> Any
       if (optimizedAST.params.some(_ => _.type === 'ANY')) {
@@ -33,6 +78,16 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
       if (optimizedAST.params.some(_ => _.type === 'UNKNOWN')) {
         log('cyan', 'optimizer', '[A, B, C, Unknown] -> Unknown', optimizedAST)
         return T_UNKNOWN
+      }
+
+      // [union of string literals] -> string
+      if (optimizedAST.params.every(_ => _.type === 'LITERAL' || _.type === 'STRING' || _.type === 'NULL')) {
+        const comment = optimizedAST.params.find(_ => _.comment)
+        if (comment?.comment) {
+          return {...T_STRING, comment: comment?.comment}
+        } else {
+          return T_STRING
+        }
       }
 
       // [A (named), A] -> [A (named)]

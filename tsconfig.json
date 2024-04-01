@@ -2,9 +2,7 @@
   "compilerOptions": {
     "declaration": false,
     "esModuleInterop": true,
-    "lib": [
-      "es2015"
-    ],
+    "lib": ["esnext", "dom"],
     "module": "commonjs",
     "moduleResolution": "node",
     "noFallthroughCasesInSwitch": true,
@@ -14,7 +12,8 @@
     "preserveConstEnums": true,
     "sourceMap": true,
     "strict": true,
-    "target": "es5"
+    "target": "ES2020",
+    "skipLibCheck": true
   },
   "exclude": [
     "example",
