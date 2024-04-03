@@ -100,6 +100,19 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
         }),
       })
 
+      // make standalone interfaces with only a single key, for ex: { [k: string] : Type } inline
+      ast = Object.assign(ast, {
+        params: ast.params.map(param => {
+          if (param.ast.type === 'INTERFACE') {
+            if (param.ast.params.length === 1 && param.ast.params[0].ast.keyName === '[k: string]') {
+              return Object.assign(param, {
+                ast: T_INTERFACE(param.ast.params, param.ast.comment),
+              })
+            } else return param
+          } else return param
+        }),
+      })
+
       ast = optimize(ast, options, processed)
 
       return ast
