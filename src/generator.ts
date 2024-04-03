@@ -334,8 +334,7 @@ function generateRawType(ast: AST, options: Options): string {
     case 'INTERSECTION':
       return generateSetOperation(ast, options)
     case 'LITERAL':
-      return 'string'
-    // return JSON.stringify(ast.params)
+      return JSON.stringify(ast.params)
     case 'NEVER':
       return 'never'
     case 'NUMBER':
@@ -455,25 +454,48 @@ function generateInterface(ast: TInterface, options: Options): string {
           [isRequired, keyName, ast, generateType(ast, options)] as [boolean, string, AST, string],
       )
       .map(([isRequired, keyName, ast, type]) => {
-        // if ((ast.type === 'STRING' || ast.type === 'ENUM' || ast.type === 'LITERAL' || ast.type === '') && escapeKeyName(keyName) !== '[k: string]') {
-        //   const res =
-        //     (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
-        //     'get ' +
-        //     escapeKeyName(keyName) +
-        //     `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, AnnotatedString)` +
-        //     '\n}'
-        //   return res
-        // } else
-        // if (ast.type === 'BOOLEAN') {
-        //   const res =
-        //     (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
-        //     'get ' +
-        //     escapeKeyName(keyName) +
-        //     `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, AnnotatedBoolean)` +
-        //     '\n}'
-        //   return res
-        // } else
-        {
+        if (
+          (ast.type === 'STRING' || ast.type === 'ENUM' || ast.type === 'LITERAL') &&
+          escapeKeyName(keyName) !== '[k: string]'
+        ) {
+          const res =
+            (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+            'get ' +
+            escapeKeyName(keyName) +
+            `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, AnnotatedString)` +
+            '\n}'
+          return res
+        } else if (ast.type === 'BOOLEAN') {
+          const res =
+            (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+            'get ' +
+            escapeKeyName(keyName) +
+            `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, AnnotatedBoolean)` +
+            '\n}'
+          return res
+        } else if (
+          (ast.type === 'INTERFACE' || ast.type === 'UNION' || ast.type === 'INTERSECTION') &&
+          ast.standaloneName &&
+          escapeKeyName(keyName) !== '[k: string]'
+        ) {
+          const res =
+            (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+            'get ' +
+            escapeKeyName(keyName) +
+            `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, ${ast.standaloneName})` +
+            '\n}'
+          return res
+        } else if (ast.type === 'ARRAY' && ast.standaloneName && escapeKeyName(keyName) !== '[k: string]') {
+          const res =
+            (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+            'get ' +
+            escapeKeyName(keyName) +
+            `() {\n return getMapEntrySequence(this.node, '${escapeKeyName(keyName)}', this.uri, ${
+              ast.standaloneName
+            })` +
+            '\n}'
+          return res
+        } else {
           const res =
             (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
             escapeKeyName(keyName) +
