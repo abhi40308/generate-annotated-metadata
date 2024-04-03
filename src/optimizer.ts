@@ -19,17 +19,17 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
         return T_STRING
       }
     case 'ARRAY':
-      // make standalone string keys inline. For example:
-      //
-      // StandaloneType = string;
-      // {
-      //   keyname: StandaloneType;
-      // }
-      //
-      // will become:
-      // {
-      //   keyname: string;
-      // }
+      /**
+       * make standalone string keys inline. For example:
+       * ```StandaloneType = string;
+       * {
+       *   keyname: StandaloneType;
+       * }```
+       * will become:
+       * {
+       *  keyname: string;
+       * }
+       * */
       ast = Object.assign(ast, {
         params: optimize(ast.params, options, processed),
       })
@@ -57,17 +57,17 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
         params: ast.params.map(_ => Object.assign(_, {ast: optimize(_.ast, options, processed)})),
       })
 
-      // make standalone string keys inline. For example:
-      //
-      // StandaloneType = string;
-      // {
-      //   keyname: StandaloneType;
-      // }
-      //
-      // will become:
-      // {
-      //   keyname: string;
-      // }
+      /**
+       * make standalone string keys inline. For example:
+       * ```StandaloneType = string;
+       * {
+       *   keyname: StandaloneType;
+       * }```
+       * will become:
+       * {
+       *  keyname: string;
+       * }
+       * */
       ast = Object.assign(ast, {
         params: ast.params.map(_ => {
           if (_.ast.standaloneName && _.ast.type === 'STRING') {
