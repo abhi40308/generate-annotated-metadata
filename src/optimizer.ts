@@ -116,11 +116,9 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
       }
 
       // [union of interfaces] -> combine all unique keys into a single interface
-      // if there are multiple keys with same name, only considers the first one encountered
-      if (
-        optimizedAST.params.length > 1 &&
-        optimizedAST.params.every(_ => _.type === 'INTERFACE' && !_.standaloneName)
-      ) {
+      // 1. if there are multiple keys with same name, only considers the first one encountered
+      // 2. if interface has standalone name, make it inline interface by removing the standalone name in optimizedAST.params (due to using T_INTERFACE)
+      if (optimizedAST.params.length > 1 && optimizedAST.params.every(_ => _.type === 'INTERFACE')) {
         const acc: TInterfaceParam[] = []
 
         ;(optimizedAST.params as TInterface[]).forEach(param => {
