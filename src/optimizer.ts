@@ -1,7 +1,7 @@
 import {uniqBy} from 'lodash'
 import {Options} from '.'
 import {generateType} from './generator'
-import {AST, T_ANY, T_STRING, T_UNKNOWN} from './types/AST'
+import {AST, TInterface, TInterfaceParam, T_ANY, T_INTERFACE, T_STRING, T_UNKNOWN} from './types/AST'
 import {log} from './utils'
 
 export function optimize(ast: AST, options: Options, processed = new Set<AST>()): AST {
@@ -12,6 +12,12 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
   processed.add(ast)
 
   switch (ast.type) {
+    case 'LITERAL':
+      if (ast.comment) {
+        return {...T_STRING, comment: ast.comment}
+      } else {
+        return T_STRING
+      }
     case 'ARRAY':
       ast = Object.assign(ast, {
         params: optimize(ast.params, options, processed),
@@ -82,9 +88,8 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
 
       // [union of string literals] -> string
       if (optimizedAST.params.every(_ => _.type === 'LITERAL' || _.type === 'STRING' || _.type === 'NULL')) {
-        const comment = optimizedAST.params.find(_ => _.comment)
-        if (comment?.comment) {
-          return {...T_STRING, comment: comment?.comment}
+        if (optimizedAST.comment) {
+          return {...T_STRING, comment: optimizedAST.comment}
         } else {
           return T_STRING
         }
@@ -108,6 +113,26 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
       if (params.length !== optimizedAST.params.length) {
         log('cyan', 'optimizer', '[A, B, B] -> [A, B]', optimizedAST)
         optimizedAST.params = params
+      }
+
+      // [union of interfaces] -> combine all unique keys into a single interface
+      // if there are multiple keys with same name, only considers the first one encountered
+      if (
+        optimizedAST.params.length > 1 &&
+        optimizedAST.params.every(_ => _.type === 'INTERFACE' && !_.standaloneName)
+      ) {
+        const acc: TInterfaceParam[] = []
+
+        ;(optimizedAST.params as TInterface[]).forEach(param => {
+          param.params.forEach(p => {
+            if (!acc.some(a => a.keyName === p.keyName)) {
+              acc.push(p)
+            }
+          })
+        })
+        return Object.assign(optimizedAST, {
+          params: [T_INTERFACE(acc, optimizedAST.comment)],
+        })
       }
 
       return Object.assign(optimizedAST, {
