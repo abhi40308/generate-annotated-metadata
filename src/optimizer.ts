@@ -19,6 +19,17 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
         return T_STRING
       }
     case 'ARRAY':
+      // make standalone string keys inline. For example:
+      //
+      // StandaloneType = string;
+      // {
+      //   keyname: StandaloneType;
+      // }
+      //
+      // will become:
+      // {
+      //   keyname: string;
+      // }
       ast = Object.assign(ast, {
         params: optimize(ast.params, options, processed),
       })
@@ -46,6 +57,17 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
         params: ast.params.map(_ => Object.assign(_, {ast: optimize(_.ast, options, processed)})),
       })
 
+      // make standalone string keys inline. For example:
+      //
+      // StandaloneType = string;
+      // {
+      //   keyname: StandaloneType;
+      // }
+      //
+      // will become:
+      // {
+      //   keyname: string;
+      // }
       ast = Object.assign(ast, {
         params: ast.params.map(_ => {
           if (_.ast.standaloneName && _.ast.type === 'STRING') {
@@ -56,6 +78,25 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
             }
           }
           return _
+        }),
+      })
+
+      // make standalone interfaces with only a single key, for ex: { [k: string] : Type } inline
+      ast = Object.assign(ast, {
+        params: ast.params.map(param => {
+          if (param.ast.type === 'UNION' || param.ast.type === 'INTERSECTION') {
+            if (param.ast.params.length === 1 && param.ast.params[0].type === 'INTERFACE') {
+              const interfaceItem = param.ast.params[0]
+              if (interfaceItem.params.length === 1 && interfaceItem.params[0].keyName === '[k: string]') {
+                return Object.assign(param, {
+                  ast: Object.assign(param.ast, {
+                    params: [T_INTERFACE([interfaceItem.params[0]], interfaceItem.comment)],
+                  }),
+                })
+              } else return param
+            } else return param
+          }
+          return param
         }),
       })
 
