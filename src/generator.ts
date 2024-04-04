@@ -539,6 +539,16 @@ function generateInterface(ast: TInterface, options: Options): string {
             })` +
             '\n}'
           return res
+        } else if (allKeys.length > 0) {
+          if (escapeKeyName(keyName) !== '[k: string]') {
+            const res =
+              (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+              escapeKeyName(keyName) +
+              (isRequired ? '' : '?') +
+              ': ' +
+              type
+            return res
+          }
         } else {
           const res =
             (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
@@ -550,7 +560,8 @@ function generateInterface(ast: TInterface, options: Options): string {
         }
       })
       .join('\n') +
-    `\n get __keys() {\n return [${allKeys.map(key => `'${key}'`)}] }\n\n}`
+    (allKeys.length > 0 ? `\n get __keys() {\n return [${allKeys.map(key => `'${key}'`)}] }\n` : '') +
+    '\n}'
   )
 }
 
