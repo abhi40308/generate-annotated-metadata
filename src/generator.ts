@@ -502,6 +502,8 @@ function handleUnionRecursively(
   keyName: string,
   type: string,
   isRequired: boolean,
+  comment?: string,
+  deprecated?: boolean,
 ): string {
   if (ast.params[0].type === 'ARRAY') {
     let standaloneName = ast.params[0].standaloneName
@@ -512,8 +514,8 @@ function handleUnionRecursively(
       ast.params[0].params.type,
       isRequired,
       standaloneName,
-      ast.comment,
-      ast.deprecated,
+      comment,
+      deprecated,
       'ARRAY',
     )
   } else if (
@@ -529,23 +531,14 @@ function handleUnionRecursively(
       ast.params[0].params[0].ast.type,
       isRequired,
       standaloneName,
-      ast.comment,
-      ast.deprecated,
+      comment,
+      deprecated,
       'MAP',
     )
   } else {
     let standaloneName = ast.standaloneName
     if (!standaloneName) standaloneName = ast.params[0].standaloneName
-    return generateEndNodes(
-      keyName,
-      type,
-      ast.params[0].type,
-      isRequired,
-      standaloneName,
-      ast.comment,
-      ast.deprecated,
-      'BASIC',
-    )
+    return generateEndNodes(keyName, type, ast.params[0].type, isRequired, standaloneName, comment, deprecated, 'BASIC')
   }
 }
 
@@ -605,7 +598,7 @@ function generateInterface(ast: TInterface, options: Options): string {
           escapeKeyName(keyName) !== '[k: string]' &&
           ast.params.length === 1
         ) {
-          return handleUnionRecursively(ast, keyName, type, isRequired)
+          return handleUnionRecursively(ast, keyName, type, isRequired, ast.comment, ast.deprecated)
         } else if (
           ast.type === 'INTERFACE' &&
           !ast.standaloneName &&
