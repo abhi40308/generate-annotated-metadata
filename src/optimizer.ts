@@ -1,7 +1,7 @@
 import {uniqBy} from 'lodash'
 import {Options} from '.'
 import {generateType} from './generator'
-import {AST, T_ANY, T_UNKNOWN} from './types/AST'
+import {AST, TInterface, TInterfaceParam, T_ANY, T_INTERFACE, T_STRING, T_UNKNOWN} from './types/AST'
 import {log} from './utils'
 
 export function optimize(ast: AST, options: Options, processed = new Set<AST>()): AST {
@@ -12,16 +12,121 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
   processed.add(ast)
 
   switch (ast.type) {
+    case 'LITERAL':
+      if (ast.comment) {
+        return {...T_STRING, comment: ast.comment}
+      } else {
+        return T_STRING
+      }
+    case 'ARRAY':
+      /**
+       * make standalone string keys inline. For example:
+       * ```StandaloneType = string;
+       * {
+       *   keyname: StandaloneType;
+       * }```
+       * will become:
+       * {
+       *  keyname: string;
+       * }
+       * */
+      ast = Object.assign(ast, {
+        params: optimize(ast.params, options, processed),
+      })
+
+      if (ast.params.standaloneName && ast.params.type === 'STRING') {
+        if (ast.params.comment) {
+          ast = Object.assign(ast, {
+            params: {...T_STRING, comment: ast.params.comment},
+          })
+        } else {
+          ast = Object.assign(ast, {
+            params: T_STRING,
+          })
+        }
+      }
+
+      return ast
+    case 'TUPLE':
+      ast = Object.assign(ast, {
+        params: ast.params.map(_ => optimize(_, options, processed)),
+      })
+      return ast
     case 'INTERFACE':
-      return Object.assign(ast, {
+      ast = Object.assign(ast, {
         params: ast.params.map(_ => Object.assign(_, {ast: optimize(_.ast, options, processed)})),
       })
+
+      /**
+       * make standalone string keys inline. For example:
+       * ```StandaloneType = string;
+       * {
+       *   keyname: StandaloneType;
+       * }```
+       * will become:
+       * {
+       *  keyname: string;
+       * }
+       * */
+      ast = Object.assign(ast, {
+        params: ast.params.map(_ => {
+          if (_.ast.standaloneName && _.ast.type === 'STRING') {
+            if (_.ast.comment) {
+              return Object.assign(_, {ast: {...T_STRING, comment: _.ast.comment}})
+            } else {
+              return Object.assign(_, {ast: T_STRING})
+            }
+          }
+          return _
+        }),
+      })
+
+      // make standalone interfaces with only a single key, for ex: { [k: string] : Type } inline
+      ast = Object.assign(ast, {
+        params: ast.params.map(param => {
+          if (param.ast.type === 'UNION' || param.ast.type === 'INTERSECTION') {
+            if (param.ast.params.length === 1 && param.ast.params[0].type === 'INTERFACE') {
+              const interfaceItem = param.ast.params[0]
+              if (interfaceItem.params.length === 1 && interfaceItem.params[0].keyName === '[k: string]') {
+                return Object.assign(param, {
+                  ast: Object.assign(param.ast, {
+                    params: [T_INTERFACE([interfaceItem.params[0]], interfaceItem.comment)],
+                  }),
+                })
+              } else return param
+            } else return param
+          }
+          return param
+        }),
+      })
+
+      // make standalone interfaces with only a single key, for ex: { [k: string] : Type } inline
+      ast = Object.assign(ast, {
+        params: ast.params.map(param => {
+          if (param.ast.type === 'INTERFACE') {
+            if (param.ast.params.length === 1 && param.ast.params[0].ast.keyName === '[k: string]') {
+              return Object.assign(param, {
+                ast: T_INTERFACE(param.ast.params, param.ast.comment),
+              })
+            } else return param
+          } else return param
+        }),
+      })
+
+      ast = optimize(ast, options, processed)
+
+      return ast
     case 'INTERSECTION':
     case 'UNION':
       // Start with the leaves...
       const optimizedAST = Object.assign(ast, {
         params: ast.params.map(_ => optimize(_, options, processed)),
       })
+
+      // [A, B, C, null] -> [A, B, C]
+      if (optimizedAST.params.some(_ => _.type === 'NULL')) {
+        optimizedAST.params = optimizedAST.params.filter(_ => _.type !== 'NULL')
+      }
 
       // [A, B, C, Any] -> Any
       if (optimizedAST.params.some(_ => _.type === 'ANY')) {
@@ -33,6 +138,15 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
       if (optimizedAST.params.some(_ => _.type === 'UNKNOWN')) {
         log('cyan', 'optimizer', '[A, B, C, Unknown] -> Unknown', optimizedAST)
         return T_UNKNOWN
+      }
+
+      // [union of string literals] -> string
+      if (optimizedAST.params.every(_ => _.type === 'LITERAL' || _.type === 'STRING' || _.type === 'NULL')) {
+        if (optimizedAST.comment) {
+          return {...T_STRING, comment: optimizedAST.comment}
+        } else {
+          return T_STRING
+        }
       }
 
       // [A (named), A] -> [A (named)]
@@ -53,6 +167,24 @@ export function optimize(ast: AST, options: Options, processed = new Set<AST>())
       if (params.length !== optimizedAST.params.length) {
         log('cyan', 'optimizer', '[A, B, B] -> [A, B]', optimizedAST)
         optimizedAST.params = params
+      }
+
+      // [union of interfaces] -> combine all unique keys into a single interface
+      // 1. if there are multiple keys with same name, only considers the first one encountered
+      // 2. if interface has standalone name, make it inline interface by removing the standalone name in optimizedAST.params (due to using T_INTERFACE)
+      if (optimizedAST.params.length > 1 && optimizedAST.params.every(_ => _.type === 'INTERFACE')) {
+        const acc: TInterfaceParam[] = []
+
+        ;(optimizedAST.params as TInterface[]).forEach(param => {
+          param.params.forEach(p => {
+            if (!acc.some(a => a.keyName === p.keyName)) {
+              acc.push(p)
+            }
+          })
+        })
+        return Object.assign(optimizedAST, {
+          params: [T_INTERFACE(acc, optimizedAST.comment)],
+        })
       }
 
       return Object.assign(optimizedAST, {

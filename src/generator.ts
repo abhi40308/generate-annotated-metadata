@@ -17,7 +17,157 @@ import {
 import {log, toSafeString} from './utils'
 
 export function generate(ast: AST, options = DEFAULT_OPTIONS): string {
-  return (
+  const prefix = `import { DocumentUri } from 'vscode-languageserver';
+  import { Node, Pair, isMap, isScalar, isSeq } from 'yaml';
+  
+  export class Annotated {
+    node: Node;
+    uri: DocumentUri;
+  
+    constructor(node: Node, uri: DocumentUri) {
+      this.node = node;
+      this.uri = uri;
+    }
+  }
+  
+  export class AnnotatedString extends Annotated {
+    get value() {
+      if (isScalar(this.node) && typeof this.node.value === 'string') {
+        return this.node.value;
+      }
+    }
+  }
+  
+  export class AnnotatedBoolean extends Annotated {
+    get value() {
+      if (isScalar(this.node) && typeof this.node.value === 'boolean') {
+        return this.node.value;
+      }
+    }
+  }
+  
+  // Represent the SecretValue schema of OpenDDS
+  // https://github.com/hasura/open-data-domain-specification/blob/main/jsonschema/metadata_object.jsonschema#L643
+  export class AnnotatedSecretValue extends Annotated {
+    get value() {
+      return getMapEntry(this.node, 'value', this.uri, AnnotatedString);
+    }
+    get stringValueFromSecret() {
+      return getMapEntry(this.node, 'stringValueFromSecret', this.uri, AnnotatedString);
+    }
+  }
+  
+  export class Any extends Annotated {
+    get(key: string) {
+      return getMapEntry(this.node, key, this.uri, Any);
+    }
+  }
+  
+  export class Map<V extends Annotated> extends Annotated {
+    private ctor: AnnotatedConstructor<V>;
+    constructor(node: Node, uri: DocumentUri, ctor: AnnotatedConstructor<V>) {
+      super(node, uri);
+      this.ctor = ctor;
+    }
+    keys(): AnnotatedString[] {
+      if (isMap(this.node)) {
+        return this.node.items.map((pair) => {
+          return new AnnotatedString(pair.key as Node, this.uri);
+        });
+      }
+      return [];
+    }
+    values(): V[] {
+      if (isMap(this.node)) {
+        return this.node.items.map((pair) => {
+          return new this.ctor(pair.value as Node, this.uri) as V;
+        });
+      }
+      return [];
+    }
+    entries(): [AnnotatedString, V][] {
+      if (isMap(this.node)) {
+        return this.node.items.map((pair) => {
+          return [new AnnotatedString(pair.key as Node, this.uri), new this.ctor(pair.value as Node, this.uri) as V];
+        });
+      }
+      return [];
+    }
+    get(key: string): V | undefined {
+      if (isMap(this.node)) {
+        const node = this.node.items.find((pair) => ((pair.key as AnnotatedString).value as string) === key)?.value;
+        return node ? (new this.ctor(node as Node, this.uri) as V) : undefined;
+      }
+      return undefined;
+    }
+  }
+  
+  export class MapEntry<T extends Annotated> {
+    keyNode: Node;
+    value: T;
+    uri: DocumentUri;
+  
+    get key() {
+      return new AnnotatedString(this.keyNode, this.uri).value;
+    }
+  
+    constructor(keyNode: Node, value: T, uri: DocumentUri) {
+      this.keyNode = keyNode;
+      this.value = value;
+      this.uri = uri;
+    }
+  }
+  
+  export class Sequence<T extends Annotated> extends Annotated {
+    private ctor: AnnotatedConstructor<T>;
+    constructor(node: Node, uri: DocumentUri, ctor: AnnotatedConstructor<T>) {
+      super(node, uri);
+      this.ctor = ctor;
+    }
+    items() {
+      if (isSeq(this.node)) {
+        return this.node.items.map((item) => new this.ctor(item as Node, this.uri));
+      }
+    }
+  
+    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+    get() {
+      return undefined;
+    }
+  }
+  
+  interface AnnotatedConstructor<T extends Annotated> {
+    new (node: Node, uri: DocumentUri): T;
+  }
+  
+  function getMapEntry<T extends Annotated>(node: Node, key: string, uri: DocumentUri, ctor: AnnotatedConstructor<T>) {
+    return getMapEntryWith(node, key, uri, (pair) => new ctor(pair.value as Node, uri));
+  }
+  
+  function getMapEntrySequence<T extends Annotated>(node: Node, key: string, uri: DocumentUri, ctor: AnnotatedConstructor<T>) {
+    return getMapEntryWith<Sequence<T>>(node, key, uri, (pair) => new Sequence<T>(pair.value as Node, uri, ctor));
+  }
+  
+  function getMapEntryMap<T extends Annotated>(node: Node, key: string, uri: DocumentUri, ctor: AnnotatedConstructor<T>) {
+    return getMapEntryWith<Map<T>>(node, key, uri, (pair) => new Map<T>(pair.value as Node, uri, ctor));
+  }
+  
+  function getMapEntryWith<T extends Annotated>(
+    node: Node,
+    key: string,
+    uri: DocumentUri,
+    fn: (pair: Pair<unknown, unknown>) => T
+  ) {
+    if (isMap(node)) {
+      for (const pair of node.items) {
+        if (isScalar(pair.key) && pair.key.value == key) {
+          return new MapEntry<T>(pair.key, fn(pair), uri);
+        }
+      }
+    }
+  }`
+
+  const types =
     [
       options.bannerComment,
       declareNamedTypes(ast, options, ast.standaloneName!),
@@ -25,8 +175,9 @@ export function generate(ast: AST, options = DEFAULT_OPTIONS): string {
       declareEnums(ast, options),
     ]
       .filter(Boolean)
-      .join('\n\n') + '\n'
-  ) // trailing newline
+      .join('\n\n') + '\n' // trailing newline
+
+  return prefix + types
 }
 
 function declareEnums(ast: AST, options: Options, processed = new Set<AST>()): string {
@@ -283,6 +434,10 @@ function generateRawType(ast: AST, options: Options): string {
   }
 }
 
+function isAnnotatedString(key: string) {
+  return key === 'STRING' || key === 'ENUM' || key === 'LITERAL' || key === 'NUMBER' || key === 'UNKNOWN'
+}
+
 /**
  * Generate a Union or Intersection
  */
@@ -292,7 +447,110 @@ function generateSetOperation(ast: TIntersection | TUnion, options: Options): st
   return members.length === 1 ? members[0] : '(' + members.join(' ' + separator + ' ') + ')'
 }
 
+function getMapEntryPrefix(mapEntryKind?: 'BASIC' | 'ARRAY' | 'MAP'): string {
+  if (mapEntryKind === 'BASIC') return 'getMapEntry'
+  else if (mapEntryKind === 'ARRAY') return 'getMapEntrySequence'
+  else if (mapEntryKind === 'MAP') return 'getMapEntryMap'
+  return ''
+}
+
+function generateEndNodes(
+  keyName: string,
+  type: string,
+  paramType: string,
+  isRequired: boolean,
+  standaloneName?: string,
+  comment?: string,
+  deprecated?: boolean,
+  mapEntryKind?: 'BASIC' | 'ARRAY' | 'MAP',
+): string {
+  const mapEntryPrefix = getMapEntryPrefix(mapEntryKind)
+  const commentString = comment ? generateComment(comment, deprecated) + '\n' : ''
+  if (standaloneName) {
+    const res =
+      commentString +
+      'get ' +
+      escapeKeyName(keyName) +
+      `() {\n return ${mapEntryPrefix}(this.node, '${escapeKeyName(keyName)}', this.uri, ${standaloneName})` +
+      '\n}'
+    return res
+  } else if (isAnnotatedString(paramType)) {
+    const res =
+      commentString +
+      'get ' +
+      escapeKeyName(keyName) +
+      `() {\n return ${mapEntryPrefix}(this.node, '${escapeKeyName(keyName)}', this.uri, AnnotatedString)` +
+      '\n}'
+    return res
+  } else if (paramType === 'BOOLEAN') {
+    const res =
+      commentString +
+      'get ' +
+      escapeKeyName(keyName) +
+      `() {\n return ${mapEntryPrefix}(this.node, '${escapeKeyName(keyName)}', this.uri, AnnotatedBoolean)` +
+      '\n}'
+    return res
+  } else {
+    // print default string
+    const res = commentString + escapeKeyName(keyName) + (isRequired ? '' : '?') + ': ' + type
+    return res
+  }
+}
+
+function handleUnionRecursively(
+  ast: TIntersection | TUnion,
+  keyName: string,
+  /** this is the original parent ast's type, which should be passed as is to the generateEndNodes function */
+  type: string,
+  isRequired: boolean,
+  comment?: string,
+  deprecated?: boolean,
+): string {
+  if ((ast.params[0].type === 'UNION' || ast.params[0].type === 'INTERSECTION') && ast.params[0].params.length === 1) {
+    return handleUnionRecursively(ast.params[0], keyName, type, isRequired, comment, deprecated)
+  } else if (ast.params[0].type === 'ARRAY') {
+    let standaloneName = ast.params[0].standaloneName
+    if (!standaloneName) standaloneName = ast.params[0].params.standaloneName
+    return generateEndNodes(
+      keyName,
+      type,
+      ast.params[0].params.type,
+      isRequired,
+      standaloneName,
+      comment,
+      deprecated,
+      'ARRAY',
+    )
+  } else if (
+    ast.params[0].type === 'INTERFACE' &&
+    !ast.params[0].standaloneName &&
+    ast.params[0].params.length === 1 &&
+    escapeKeyName(ast.params[0].params[0].keyName) === '[k: string]'
+  ) {
+    const standaloneName = ast.params[0].params[0].ast.standaloneName
+    return generateEndNodes(
+      keyName,
+      type,
+      ast.params[0].params[0].ast.type,
+      isRequired,
+      standaloneName,
+      comment,
+      deprecated,
+      'MAP',
+    )
+  } else {
+    let standaloneName = ast.standaloneName
+    if (!standaloneName) standaloneName = ast.params[0].standaloneName
+    return generateEndNodes(keyName, type, ast.params[0].type, isRequired, standaloneName, comment, deprecated, 'BASIC')
+  }
+}
+
 function generateInterface(ast: TInterface, options: Options): string {
+  const allKeys = ast.params
+    .filter(_ => !_.isPatternProperty && !_.isUnreachableDefinition)
+    .filter(({keyName}) => escapeKeyName(keyName) !== '[k: string]')
+    .map(({keyName}) => escapeKeyName(keyName))
+
   return (
     `{` +
     '\n' +
@@ -302,17 +560,108 @@ function generateInterface(ast: TInterface, options: Options): string {
         ({isRequired, keyName, ast}) =>
           [isRequired, keyName, ast, generateType(ast, options)] as [boolean, string, AST, string],
       )
-      .map(
-        ([isRequired, keyName, ast, type]) =>
-          (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
-          escapeKeyName(keyName) +
-          (isRequired ? '' : '?') +
-          ': ' +
-          type,
-      )
+      .map(([isRequired, keyName, ast, type]) => {
+        if (isAnnotatedString(ast.type) && escapeKeyName(keyName) !== '[k: string]') {
+          const res =
+            (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+            'get ' +
+            escapeKeyName(keyName) +
+            `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, AnnotatedString)` +
+            '\n}'
+          return res
+        } else if (ast.type === 'BOOLEAN' && escapeKeyName(keyName) !== '[k: string]') {
+          const res =
+            (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+            'get ' +
+            escapeKeyName(keyName) +
+            `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, AnnotatedBoolean)` +
+            '\n}'
+          return res
+        } else if (ast.type === 'INTERFACE' && ast.standaloneName && escapeKeyName(keyName) !== '[k: string]') {
+          const res =
+            (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+            'get ' +
+            escapeKeyName(keyName) +
+            `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, ${ast.standaloneName})` +
+            '\n}'
+          return res
+        } else if (ast.type === 'ARRAY' && escapeKeyName(keyName) !== '[k: string]') {
+          return generateEndNodes(
+            keyName,
+            type,
+            ast.params.type,
+            isRequired,
+            ast.params.standaloneName,
+            ast.comment,
+            ast.deprecated,
+            'ARRAY',
+          )
+        } else if (
+          (ast.type === 'UNION' || ast.type === 'INTERSECTION') &&
+          escapeKeyName(keyName) !== '[k: string]' &&
+          ast.params.length === 1
+        ) {
+          // handle if there are standalone name in key. Ex. key : A , then A = B, then B = {}
+          // TODO: do this recursively
+          if (
+            ast.params[0].standaloneName &&
+            (ast.params[0].type === 'UNION' || ast.params[0].type === 'INTERSECTION') &&
+            ast.params[0].params.length === 1 &&
+            ast.params[0].params[0].type === 'INTERFACE' &&
+            ast.params[0].params[0].standaloneName
+          ) {
+            const res =
+              (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+              'get ' +
+              escapeKeyName(keyName) +
+              `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, ${
+                ast.params[0].params[0].standaloneName
+              })` +
+              '\n}'
+            return res
+          } else {
+            return handleUnionRecursively(ast, keyName, type, isRequired, ast.comment, ast.deprecated)
+          }
+        } else if (
+          ast.type === 'INTERFACE' &&
+          !ast.standaloneName &&
+          ast.params.length === 1 &&
+          escapeKeyName(ast.params[0].keyName) === '[k: string]'
+        ) {
+          const standaloneName = ast.params[0].ast.standaloneName
+          return generateEndNodes(
+            keyName,
+            type,
+            ast.params[0].ast.type,
+            isRequired,
+            standaloneName,
+            ast.comment,
+            ast.deprecated,
+            'MAP',
+          )
+        } else if (allKeys.length > 0) {
+          if (escapeKeyName(keyName) !== '[k: string]') {
+            const res =
+              (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+              escapeKeyName(keyName) +
+              (isRequired ? '' : '?') +
+              ': ' +
+              type
+            return res
+          }
+        } else {
+          const res =
+            (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+            escapeKeyName(keyName) +
+            (isRequired ? '' : '?') +
+            ': ' +
+            type
+          return res
+        }
+      })
       .join('\n') +
-    '\n' +
-    '}'
+    (allKeys.length > 0 ? `\n get __keys() {\n return [${allKeys.map(key => `'${key}'`)}] }\n` : '') +
+    '\n}'
   )
 }
 
@@ -344,7 +693,7 @@ function generateStandaloneEnum(ast: TEnum, options: Options): string {
 function generateStandaloneInterface(ast: TNamedInterface, options: Options): string {
   return (
     (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
-    `export interface ${toSafeString(ast.standaloneName)} ` +
+    `export class ${toSafeString(ast.standaloneName)} extends Annotated ` +
     (ast.superTypes.length > 0
       ? `extends ${ast.superTypes.map(superType => toSafeString(superType.standaloneName)).join(', ')} `
       : '') +
@@ -353,13 +702,13 @@ function generateStandaloneInterface(ast: TNamedInterface, options: Options): st
 }
 
 function generateStandaloneType(ast: ASTWithStandaloneName, options: Options): string {
-  return (
-    (hasComment(ast) ? generateComment(ast.comment) + '\n' : '') +
-    `export type ${toSafeString(ast.standaloneName)} = ${generateType(
-      omit<AST>(ast, 'standaloneName') as AST /* TODO */,
-      options,
-    )}`
-  )
+  const generatedType = generateType(omit<AST>(ast, 'standaloneName') as AST /* TODO */, options)
+
+  const suffix = generatedType.startsWith('{')
+    ? `export class ${toSafeString(ast.standaloneName)} extends Annotated ${generatedType}`
+    : `export type ${toSafeString(ast.standaloneName)} = ${generatedType}`
+
+  return (hasComment(ast) ? generateComment(ast.comment) + '\n' : '') + suffix
 }
 
 function escapeKeyName(keyName: string): string {
