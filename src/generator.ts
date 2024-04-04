@@ -601,7 +601,27 @@ function generateInterface(ast: TInterface, options: Options): string {
           escapeKeyName(keyName) !== '[k: string]' &&
           ast.params.length === 1
         ) {
-          return handleUnionRecursively(ast, keyName, type, isRequired, ast.comment, ast.deprecated)
+          // handle if there are standalone name in key. Ex. key : A , then A = B, then B = {}
+          // TODO: do this recursively
+          if (
+            ast.params[0].standaloneName &&
+            (ast.params[0].type === 'UNION' || ast.params[0].type === 'INTERSECTION') &&
+            ast.params[0].params.length === 1 &&
+            ast.params[0].params[0].type === 'INTERFACE' &&
+            ast.params[0].params[0].standaloneName
+          ) {
+            const res =
+              (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+              'get ' +
+              escapeKeyName(keyName) +
+              `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, ${
+                ast.params[0].params[0].standaloneName
+              })` +
+              '\n}'
+            return res
+          } else {
+            return handleUnionRecursively(ast, keyName, type, isRequired, ast.comment, ast.deprecated)
+          }
         } else if (
           ast.type === 'INTERFACE' &&
           !ast.standaloneName &&
