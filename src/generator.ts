@@ -497,6 +497,58 @@ function generateEndNodes(
   }
 }
 
+function handleUnionRecursively(
+  ast: TIntersection | TUnion,
+  keyName: string,
+  type: string,
+  isRequired: boolean,
+): string {
+  if (ast.params[0].type === 'ARRAY') {
+    let standaloneName = ast.params[0].standaloneName
+    if (!standaloneName) standaloneName = ast.params[0].params.standaloneName
+    return generateEndNodes(
+      keyName,
+      type,
+      ast.params[0].params.type,
+      isRequired,
+      standaloneName,
+      ast.comment,
+      ast.deprecated,
+      'ARRAY',
+    )
+  } else if (
+    ast.params[0].type === 'INTERFACE' &&
+    !ast.params[0].standaloneName &&
+    ast.params[0].params.length === 1 &&
+    escapeKeyName(ast.params[0].params[0].keyName) === '[k: string]'
+  ) {
+    const standaloneName = ast.params[0].params[0].ast.standaloneName
+    return generateEndNodes(
+      keyName,
+      type,
+      ast.params[0].params[0].ast.type,
+      isRequired,
+      standaloneName,
+      ast.comment,
+      ast.deprecated,
+      'MAP',
+    )
+  } else {
+    let standaloneName = ast.standaloneName
+    if (!standaloneName) standaloneName = ast.params[0].standaloneName
+    return generateEndNodes(
+      keyName,
+      type,
+      ast.params[0].type,
+      isRequired,
+      standaloneName,
+      ast.comment,
+      ast.deprecated,
+      'BASIC',
+    )
+  }
+}
+
 function generateInterface(ast: TInterface, options: Options): string {
   const allKeys = ast.params
     .filter(_ => !_.isPatternProperty && !_.isUnreachableDefinition)
@@ -513,10 +565,6 @@ function generateInterface(ast: TInterface, options: Options): string {
           [isRequired, keyName, ast, generateType(ast, options)] as [boolean, string, AST, string],
       )
       .map(([isRequired, keyName, ast, type]) => {
-        if (keyName === 'filter') {
-          console.log(ast)
-        }
-
         if (isAnnotatedString(ast.type) && escapeKeyName(keyName) !== '[k: string]') {
           const res =
             (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
@@ -557,50 +605,7 @@ function generateInterface(ast: TInterface, options: Options): string {
           escapeKeyName(keyName) !== '[k: string]' &&
           ast.params.length === 1
         ) {
-          if (ast.params[0].type === 'ARRAY') {
-            let standaloneName = ast.params[0].standaloneName
-            if (!standaloneName) standaloneName = ast.params[0].params.standaloneName
-            return generateEndNodes(
-              keyName,
-              type,
-              ast.params[0].params.type,
-              isRequired,
-              standaloneName,
-              ast.comment,
-              ast.deprecated,
-              'ARRAY',
-            )
-          } else if (
-            ast.params[0].type === 'INTERFACE' &&
-            !ast.params[0].standaloneName &&
-            ast.params[0].params.length === 1 &&
-            escapeKeyName(ast.params[0].params[0].keyName) === '[k: string]'
-          ) {
-            const standaloneName = ast.params[0].params[0].ast.standaloneName
-            return generateEndNodes(
-              keyName,
-              type,
-              ast.params[0].params[0].ast.type,
-              isRequired,
-              standaloneName,
-              ast.comment,
-              ast.deprecated,
-              'MAP',
-            )
-          } else {
-            let standaloneName = ast.standaloneName
-            if (!standaloneName) standaloneName = ast.params[0].standaloneName
-            return generateEndNodes(
-              keyName,
-              type,
-              ast.params[0].type,
-              isRequired,
-              standaloneName,
-              ast.comment,
-              ast.deprecated,
-              'BASIC',
-            )
-          }
+          return handleUnionRecursively(ast, keyName, type, isRequired)
         } else if (
           ast.type === 'INTERFACE' &&
           !ast.standaloneName &&
