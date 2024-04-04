@@ -444,6 +444,11 @@ function generateSetOperation(ast: TIntersection | TUnion, options: Options): st
 }
 
 function generateInterface(ast: TInterface, options: Options): string {
+  const allKeys = ast.params
+    .filter(_ => !_.isPatternProperty && !_.isUnreachableDefinition)
+    .filter(({keyName}) => escapeKeyName(keyName) !== '[k: string]')
+    .map(({keyName}) => escapeKeyName(keyName))
+
   return (
     `{` +
     '\n' +
@@ -523,14 +528,14 @@ function generateInterface(ast: TInterface, options: Options): string {
           (ast.type === 'UNION' || ast.type === 'INTERSECTION') &&
           escapeKeyName(keyName) !== '[k: string]' &&
           ast.params.length === 1 &&
-          ast.params[0].standaloneName
+          (ast.standaloneName || ast.params[0].standaloneName)
         ) {
           const res =
             (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
             'get ' +
             escapeKeyName(keyName) +
             `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, ${
-              ast.params[0].standaloneName
+              ast.standaloneName ? ast.standaloneName : ast.params[0].standaloneName
             })` +
             '\n}'
           return res
@@ -545,8 +550,7 @@ function generateInterface(ast: TInterface, options: Options): string {
         }
       })
       .join('\n') +
-    '\n' +
-    '}'
+    `\n get __keys() {\n return [${allKeys.map(key => `'${key}'`)}] }\n\n}`
   )
 }
 
