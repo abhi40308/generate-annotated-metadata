@@ -500,12 +500,15 @@ function generateEndNodes(
 function handleUnionRecursively(
   ast: TIntersection | TUnion,
   keyName: string,
+  /** this is the original parent ast's type, which should be passed as is to the generateEndNodes function */
   type: string,
   isRequired: boolean,
   comment?: string,
   deprecated?: boolean,
 ): string {
-  if (ast.params[0].type === 'ARRAY') {
+  if ((ast.params[0].type === 'UNION' || ast.params[0].type === 'INTERSECTION') && ast.params[0].params.length === 1) {
+    return handleUnionRecursively(ast.params[0], keyName, type, isRequired, comment, deprecated)
+  } else if (ast.params[0].type === 'ARRAY') {
     let standaloneName = ast.params[0].standaloneName
     if (!standaloneName) standaloneName = ast.params[0].params.standaloneName
     return generateEndNodes(
