@@ -455,7 +455,11 @@ function generateInterface(ast: TInterface, options: Options): string {
       )
       .map(([isRequired, keyName, ast, type]) => {
         if (
-          (ast.type === 'STRING' || ast.type === 'ENUM' || ast.type === 'LITERAL' || ast.type === 'NUMBER') &&
+          (ast.type === 'STRING' ||
+            ast.type === 'ENUM' ||
+            ast.type === 'LITERAL' ||
+            ast.type === 'NUMBER' ||
+            ast.type === 'UNKNOWN') &&
           escapeKeyName(keyName) !== '[k: string]'
         ) {
           const res =
@@ -496,7 +500,8 @@ function generateInterface(ast: TInterface, options: Options): string {
             ast.params.type === 'STRING' ||
             ast.params.type === 'ENUM' ||
             ast.params.type === 'LITERAL' ||
-            ast.params.type === 'NUMBER'
+            ast.params.type === 'NUMBER' ||
+            ast.params.type === 'UNKNOWN'
           ) {
             const res =
               (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
@@ -514,6 +519,21 @@ function generateInterface(ast: TInterface, options: Options): string {
               '\n}'
             return res
           }
+        } else if (
+          (ast.type === 'UNION' || ast.type === 'INTERSECTION') &&
+          escapeKeyName(keyName) !== '[k: string]' &&
+          ast.params.length === 1 &&
+          ast.params[0].standaloneName
+        ) {
+          const res =
+            (hasComment(ast) ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+            'get ' +
+            escapeKeyName(keyName) +
+            `() {\n return getMapEntry(this.node, '${escapeKeyName(keyName)}', this.uri, ${
+              ast.params[0].standaloneName
+            })` +
+            '\n}'
+          return res
         } else {
           const res =
             (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
